@@ -12,6 +12,8 @@ MouseArea {
   signal tapped()
 
   enabled: root.interactive
+  // For a pointer's hover highlight; a finger never hovers.
+  hoverEnabled: root.interactive
   cursorShape: root.interactive ? Qt.PointingHandCursor : Qt.ArrowCursor
   onClicked: root.tapped()
 }

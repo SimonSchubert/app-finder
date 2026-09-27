@@ -21,15 +21,29 @@ Item {
   readonly property var badge: Catalog.badge(root.app)
   readonly property bool busy: !!root.job && root.job.state !== "error"
 
+  // A card with an edge of its own, for the desktop's grid; a bare row that
+  // lights up under the finger, for the phone's list.
+  property bool card: false
+  // The app whose page is open beside the grid.
+  property bool selected: false
+
   implicitHeight: tokens.space(68)
+
+  Card {
+    anchors.fill: parent
+    visible: root.card
+    border.width: root.selected ? 1 : 0
+    border.color: tokens.accent
+    color: root.selected ? Qt.tint(tokens.sheetCard, tokens.alpha(tokens.accent, 0.1)) : tokens.sheetCard
+  }
 
   Rectangle {
     anchors.fill: parent
-    anchors.topMargin: tokens.space(2)
-    anchors.bottomMargin: tokens.space(2)
+    anchors.topMargin: root.card ? 0 : tokens.space(2)
+    anchors.bottomMargin: root.card ? 0 : tokens.space(2)
     radius: tokens.radiusCard
-    color: tokens.sheetPressed
-    visible: touch.lit
+    color: touch.lit ? tokens.sheetPressed : tokens.alpha(tokens.sheetForeground, 0.04)
+    visible: touch.lit || (root.card && touch.containsMouse)
   }
 
   Monogram {

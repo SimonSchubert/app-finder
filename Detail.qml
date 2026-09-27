@@ -23,6 +23,9 @@ Item {
   property bool installed: false
   property var job: null
 
+  // Beside the grid on a wide window the page closes rather than going back.
+  property bool closeGlyph: false
+
   signal back()
   signal install()
   signal remove()
@@ -508,7 +511,7 @@ Item {
 
     Glyph {
       anchors.centerIn: parent
-      text: Glyphs.BACK
+      text: root.closeGlyph ? Glyphs.CLOSE : Glyphs.BACK
       fontSize: tokens.iconSizeLarge
       color: "white"
       optical: true

@@ -316,6 +316,9 @@ Item {
         + " loading=" + (root.loading ? 1 : 0)
         + " offline=" + (root.offline ? 1 : 0)
         + " current=" + (root.current === "" ? "-" : root.current)
+        + " layout=" + (root.compact ? "phone" : root.split ? "split" : "desktop")
+        + " size=" + stage.width + "x" + stage.height
+        + " searchFocus=" + (root.searchField && root.searchField.active ? 1 : 0)
         + " error=" + (root.error === "" ? "-" : root.error)
     }
 
@@ -332,12 +335,21 @@ Item {
 
   // ------------------------------------------------------------ the window
 
+  // Laid out from the window's own width, not from what it runs on: a phone
+  // app below 720 -- a list, pages that slide over it -- and above it a
+  // desktop app, with a rail, a grid of cards, and from 1100 the app's page
+  // beside the grid instead of over it.
+  readonly property bool compact: stage.width < 720
+  readonly property bool split: stage.width >= 1100
+  readonly property int railWidth: 220
+  readonly property int paneWidth: 440
+
   FloatingWindow {
     id: appWindow
     visible: false
     title: "App Finder"
     color: tokens.sheetOpaque
-    implicitWidth: 480
+    implicitWidth: 1180
     implicitHeight: 820
     minimumSize: Qt.size(340, 480)
 
@@ -349,32 +361,209 @@ Item {
     }
 
     FocusScope {
+      id: stage
       anchors.fill: parent
       focus: true
 
       Keys.onEscapePressed: root.back()
+      // "/" to search, from anywhere a field is not already taking the key.
+      Keys.onPressed: function (event) {
+        if (event.text === "/" && root.searchField && root.page === "browse") {
+          root.detailId = root.split ? root.detailId : ""
+          root.searchField.takeFocus()
+          event.accepted = true
+        }
+      }
 
-      // ---------------------------------------------------------- browse
+      // ---------------------------------------------------------- the rail
+
+      Rectangle {
+        id: rail
+        visible: !root.compact
+        width: visible ? root.railWidth : 0
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        color: tokens.sheetCard
+
+        Column {
+          anchors.fill: parent
+          anchors.margins: tokens.space(12)
+          spacing: tokens.space(4)
+
+          Label {
+            x: tokens.space(8)
+            height: tokens.space(52)
+            verticalAlignment: Text.AlignVCenter
+            text: "App Finder"
+            font.pixelSize: tokens.space(22)
+            font.weight: Font.Medium
+          }
+
+          Repeater {
+            model: [
+              { key: "browse", label: "Browse", glyph: Glyphs.MAGNIFY, count: root.apps.length },
+              { key: "installed", label: "Installed", glyph: Glyphs.DOWNLOAD, count: root.installedApps.length }
+            ]
+
+            delegate: Rectangle {
+              id: navItem
+              required property var modelData
+              readonly property bool selected: root.page === modelData.key
+              width: parent.width
+              height: tokens.space(40)
+              radius: tokens.radiusCard
+              color: navItem.selected ? tokens.alpha(tokens.accent, 0.14)
+                : navTouch.lit ? tokens.sheetPressed
+                : navTouch.containsMouse ? tokens.alpha(tokens.sheetForeground, 0.05)
+                : "transparent"
+
+              Row {
+                anchors.left: parent.left
+                anchors.leftMargin: tokens.space(8)
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: tokens.space(8)
+
+                Glyph {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: navItem.modelData.glyph
+                  color: navItem.selected ? tokens.accent : tokens.sheetDim
+                }
+
+                Label {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: navItem.modelData.label
+                  color: navItem.selected ? tokens.accent : tokens.sheetForeground
+                }
+              }
+
+              Label {
+                anchors.right: parent.right
+                anchors.rightMargin: tokens.space(12)
+                anchors.verticalCenter: parent.verticalCenter
+                visible: navItem.modelData.count > 0
+                text: navItem.modelData.count
+                role: "caption"
+                tone: "dim"
+              }
+
+              TouchArea {
+                id: navTouch
+                anchors.fill: parent
+                onTapped: {
+                  if (!root.split) root.detailId = ""
+                  root.page = navItem.modelData.key
+                }
+              }
+            }
+          }
+        }
+
+        // Offline, at the foot of the rail rather than over the grid.
+        Label {
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          anchors.margins: tokens.space(20)
+          visible: root.offline
+          wrapMode: Text.WordWrap
+          elide: Text.ElideNone
+          role: "caption"
+          tone: "dim"
+          text: "Offline · updated " + Catalog.ago(root.fetchedAt, root.now)
+        }
+      }
+
+      // ---------------------------------------------------------- the list
 
       Item {
-        id: lists
-        anchors.fill: parent
+        id: main
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.left: rail.right
+        anchors.right: root.split && root.detailApp ? pane.left : parent.right
 
-        ListView {
+        // The desktop's search and heading, above the grid.
+        Item {
+          id: topBar
+          visible: !root.compact
+          width: parent.width
+          height: visible ? tokens.space(72) : 0
+
+          Label {
+            anchors.left: parent.left
+            anchors.leftMargin: tokens.space(24)
+            anchors.verticalCenter: parent.verticalCenter
+            visible: root.page === "installed"
+            text: "Installed"
+            font.pixelSize: tokens.space(22)
+            font.weight: Font.Medium
+          }
+
+          Loader {
+            anchors.left: parent.left
+            anchors.leftMargin: tokens.space(18)
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.min(parent.width - tokens.space(36), tokens.space(520))
+            active: !root.compact && root.page === "browse"
+            visible: active
+            sourceComponent: searchComponent
+          }
+        }
+
+        Component {
+          id: searchComponent
+
+          SearchField {
+            id: field
+            glyph: Glyphs.MAGNIFY
+            clearGlyph: Glyphs.CLOSE
+            placeholder: root.apps.length > 0 ? "Search " + root.apps.length + " apps" : "Search apps"
+            onTextChanged: root.query = text
+            Component.onCompleted: {
+              text = root.query
+              root.searchField = field
+            }
+            Component.onDestruction: if (root.searchField === field) root.searchField = null
+          }
+        }
+
+        GridView {
           id: list
-          anchors.fill: parent
+          anchors.top: topBar.bottom
+          anchors.bottom: parent.bottom
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: root.compact ? 0 : tokens.space(12)
+          anchors.rightMargin: root.compact ? 0 : tokens.space(12)
           clip: true
           boundsBehavior: Flickable.StopAtBounds
-          // A ScriptModel and not the array itself. A ListView given a new
-          // model makes row 0 current and gives it focus, and every keystroke
-          // in the search makes a new array -- so the field in the header
-          // would lose focus after each character. This one stays put and has
-          // rows inserted and removed instead.
+
+          // One column on a phone, which is a list; as many 320-wide cards as
+          // fit on a desktop.
+          readonly property int columns: root.compact ? 1 : Math.max(1, Math.floor(width / tokens.space(320)))
+          cellWidth: Math.floor(width / columns)
+          cellHeight: root.compact ? tokens.space(68) : tokens.space(84)
+
+          // Opening the page beside the grid takes a column away, and the
+          // reflow would leave the scroll wherever it lands. Keep the app
+          // whose page is open in view instead.
+          function reveal() {
+            var values = root.page === "browse" ? root.filtered.apps : root.installedApps
+            for (var i = 0; i < values.length; i++)
+              if (values[i].id === root.detailId) { list.positionViewAtIndex(i, GridView.Contain); return }
+          }
+          onColumnsChanged: if (root.detailId !== "") Qt.callLater(list.reveal)
+
+          // A ScriptModel and not the array itself. A view given a new model
+          // makes item 0 current and gives it focus, and every keystroke in
+          // the search makes a new array -- so the field in the header would
+          // lose focus after each character. This one stays put and has items
+          // inserted and removed instead.
           model: ScriptModel {
             values: root.page === "browse" ? root.filtered.apps : root.installedApps
           }
           cacheBuffer: tokens.space(600)
-          // No current row either: a current row is a row with focus.
+          // No current item either: a current item is an item with focus.
           currentIndex: -1
           keyNavigationEnabled: false
 
@@ -382,15 +571,17 @@ Item {
             width: list.width
             spacing: 0
 
-            // A ListView holds its first row still when the header above it
+            // A view holds its first item still when the header above it
             // grows, so the carousel arriving would scroll the title, the
             // search and the carousel itself off the top. Nobody is reading
             // the list while the header is still settling.
             onHeightChanged: if (!list.moving && !list.dragging) list.positionViewAtBeginning()
 
+            // The phone's title and tabs; the desktop has its rail.
             Item {
+              visible: root.compact
               width: parent.width
-              height: tokens.tapSlot + tokens.space(12)
+              height: visible ? tokens.tapSlot + tokens.space(12) : 0
 
               Label {
                 anchors.left: parent.left
@@ -421,30 +612,18 @@ Item {
             }
 
             Loader {
-              id: search
               x: tokens.space(12)
               width: parent.width - 2 * x
-              active: root.page === "browse"
+              active: root.compact && root.page === "browse"
               visible: active
-              sourceComponent: SearchField {
-                id: field
-                glyph: Glyphs.MAGNIFY
-                clearGlyph: Glyphs.CLOSE
-                placeholder: root.apps.length > 0 ? "Search " + root.apps.length + " apps" : "Search apps"
-                onTextChanged: root.query = text
-                Component.onCompleted: {
-                  text = root.query
-                  root.searchField = field
-                }
-                Component.onDestruction: if (root.searchField === field) root.searchField = null
-              }
+              sourceComponent: searchComponent
             }
 
             // Offline, or the list could not be reached at all.
             Item {
               width: parent.width
               height: visible ? tokens.space(34) : 0
-              visible: root.offline || (root.error !== "" && root.apps.length > 0)
+              visible: root.compact && (root.offline || (root.error !== "" && root.apps.length > 0))
 
               Row {
                 anchors.left: parent.left
@@ -473,8 +652,18 @@ Item {
             Column {
               width: parent.width
               visible: root.page === "browse" && root.browsing && root.featured.length > 0
-              topPadding: tokens.space(18)
+              topPadding: root.compact ? tokens.space(18) : 0
               spacing: tokens.space(10)
+
+              Text {
+                visible: !root.compact
+                x: tokens.space(12)
+                text: "Works well on a phone"
+                font.family: tokens.studioFontFamily
+                font.pixelSize: tokens.phoneAppText
+                font.weight: Font.DemiBold
+                color: tokens.sheetForeground
+              }
 
               ListView {
                 id: carousel
@@ -487,8 +676,8 @@ Item {
                 height: cardHeight + tokens.space(50)
                 orientation: ListView.Horizontal
                 spacing: tokens.space(12)
-                leftMargin: tokens.space(16)
-                rightMargin: tokens.space(16)
+                leftMargin: root.compact ? tokens.space(16) : tokens.space(12)
+                rightMargin: leftMargin
                 boundsBehavior: Flickable.StopAtBounds
                 model: root.featured
                 // A list that changes under the row starts it over rather
@@ -496,6 +685,16 @@ Item {
                 // positionViewAtBeginning() would put the first card on the
                 // edge, inside leftMargin.
                 onModelChanged: Qt.callLater(function () { carousel.contentX = carousel.originX - carousel.leftMargin })
+
+                // A mouse wheel scrolls the page, not the row: a desktop row
+                // that ate the wheel would stop the page under the pointer.
+                WheelHandler {
+                  acceptedDevices: PointerDevice.Mouse
+                  onWheel: (event) => {
+                    list.contentY = Math.max(list.originY, Math.min(list.contentY - event.angleDelta.y,
+                      list.originY + list.contentHeight - list.height))
+                  }
+                }
 
                 delegate: Column {
                   id: phoneCard
@@ -511,7 +710,7 @@ Item {
                     ratio: Catalog.SHOT_RATIO
                     outlined: true
                     sources: phoneCard.modelData.phoneShots || []
-                    cycling: appWindow.visible && root.detailId === "" && root.page === "browse" && root.browsing
+                    cycling: appWindow.visible && (root.split || root.detailId === "") && root.page === "browse" && root.browsing
                     cycleDelay: phoneCard.index * 900
                     decodeWidth: 540
                     initials: phoneCard.modelData.initials
@@ -552,11 +751,11 @@ Item {
             Item {
               width: parent.width
               height: tokens.space(40)
-              visible: list.count > 0
+              visible: list.count > 0 && (root.compact || root.page === "browse")
 
               Text {
                 anchors.left: parent.left
-                anchors.leftMargin: tokens.phoneSide
+                anchors.leftMargin: root.compact ? tokens.phoneSide : tokens.space(12)
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: tokens.space(6)
                 text: root.page === "installed" ? "Installed"
@@ -570,13 +769,22 @@ Item {
             }
           }
 
-          delegate: AppRow {
+          delegate: Item {
+            id: cell
             required property var modelData
-            width: list.width
-            app: modelData
-            installed: root.isInstalled(modelData.id)
-            job: root.jobs[modelData.id] || null
-            onTapped: root.show(modelData.id)
+            width: list.cellWidth
+            height: list.cellHeight
+
+            AppRow {
+              anchors.fill: parent
+              anchors.margins: root.compact ? 0 : tokens.space(6)
+              card: !root.compact
+              app: cell.modelData
+              installed: root.isInstalled(cell.modelData.id)
+              job: root.jobs[cell.modelData.id] || null
+              selected: !root.compact && root.detailId === cell.modelData.id
+              onTapped: root.show(cell.modelData.id)
+            }
           }
 
           // The ones that do not fit a phone, folded away.
@@ -602,7 +810,7 @@ Item {
 
         Column {
           anchors.centerIn: parent
-          width: parent.width - 2 * tokens.phoneSide
+          width: Math.min(parent.width - 2 * tokens.phoneSide, tokens.space(420))
           spacing: tokens.space(12)
           visible: list.count === 0 && !(root.loading && root.apps.length === 0)
 
@@ -637,8 +845,9 @@ Item {
         // Skeleton rows while the first list is on its way.
         Column {
           id: skeleton
-          y: tokens.space(170)
-          width: parent.width
+          y: root.compact ? tokens.space(170) : topBar.height + tokens.space(12)
+          x: root.compact ? 0 : tokens.space(12)
+          width: parent.width - 2 * x
           visible: root.loading && root.apps.length === 0 && root.page === "browse"
 
           SequentialAnimation on opacity {
@@ -691,35 +900,48 @@ Item {
 
       // ---------------------------------------------------------- an app
 
-      // Over the list rather than instead of it, so back lands on the row it
-      // left from with the list where it was.
+      // Beside the grid on a wide window. On a narrower one, over the list
+      // rather than instead of it, so back lands on the row it left from with
+      // the list where it was -- across the whole window on a phone, and
+      // beside the rail, its content held to a readable width, on a desktop.
       Rectangle {
-        id: detailSheet
-        width: parent.width
+        id: pane
+        width: root.split ? root.paneWidth : parent.width - rail.width
         height: parent.height
         color: tokens.sheetOpaque
-        x: root.detailApp ? 0 : width
-        visible: x < width
+        x: root.detailApp ? parent.width - width : parent.width
+        visible: x < parent.width
         Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+
+        // The seam between the grid and the page, when they sit side by side.
+        Rectangle {
+          visible: root.split
+          width: 1
+          height: parent.height
+          color: tokens.alpha(tokens.sheetForeground, 0.1)
+        }
 
         // Kept after the page closes, so the slide out still has something on it.
         property var shown: null
         Connections {
           target: root
-          function onDetailAppChanged() { if (root.detailApp) detailSheet.shown = root.detailApp }
+          function onDetailAppChanged() { if (root.detailApp) pane.shown = root.detailApp }
         }
 
         Detail {
-          anchors.fill: parent
-          app: detailSheet.shown
-          installed: !!detailSheet.shown && root.isInstalled(detailSheet.shown.id)
-          job: detailSheet.shown ? (root.jobs[detailSheet.shown.id] || null) : null
+          width: Math.min(parent.width, tokens.space(760))
+          height: parent.height
+          anchors.horizontalCenter: parent.horizontalCenter
+          app: pane.shown
+          installed: !!pane.shown && root.isInstalled(pane.shown.id)
+          job: pane.shown ? (root.jobs[pane.shown.id] || null) : null
+          closeGlyph: root.split
           onBack: root.detailId = ""
-          onInstall: root.install(detailSheet.shown.id)
-          onRetry: root.install(detailSheet.shown.id)
-          onRemove: root.remove(detailSheet.shown.id)
-          onOpen: root.openApp(detailSheet.shown.id)
-          onSource: root.openSource(detailSheet.shown.id)
+          onInstall: root.install(pane.shown.id)
+          onRetry: root.install(pane.shown.id)
+          onRemove: root.remove(pane.shown.id)
+          onOpen: root.openApp(pane.shown.id)
+          onSource: root.openSource(pane.shown.id)
         }
       }
     }
