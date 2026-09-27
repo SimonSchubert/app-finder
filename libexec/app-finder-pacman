@@ -1,0 +1,28 @@
+#!/bin/bash
+# App Finder's root half: pacman, as root, run through pkexec.
+#
+#   pkexec /usr/lib/app-finder/app-finder-pacman pacman <args>
+#
+# yay is told to use app-finder-sudo in place of sudo, and that lands here. It
+# goes through App Finder's own polkit action, not pkexec's generic one,
+# because that action is auth_admin_keep: yay asks for root three or four
+# times in one install (the build's dependencies, marking them, the package
+# itself), and polkit keeps the first yes for the rest instead of prompting
+# for each one.
+#
+# Only pacman, and only the operations an install or a removal uses.
+set -euo pipefail
+
+fail() { echo "app-finder-pacman: $*" >&2; exit 1; }
+
+[[ ${1:-} == pacman || ${1:-} == /usr/bin/pacman ]] || fail "only pacman runs through here"
+shift
+case ${1:-} in
+  -S|-S?*|-U|-U?*|-D|-D?*|-R|-R?*) ;;
+  *) fail "not an install or removal: ${1:-}" ;;
+esac
+# -Sy and friends would sync the databases under the user's feet: an install
+# never needs it, and a partial upgrade is how an Arch system breaks.
+[[ $1 == -S* && $1 == *y* ]] && fail "no database refresh from here"
+
+exec /usr/bin/pacman "$@"

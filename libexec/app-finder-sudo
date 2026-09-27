@@ -1,0 +1,6 @@
+#!/bin/sh
+# What yay runs in place of sudo during an install: pkexec, through App
+# Finder's polkit action (see app-finder-pacman). exec, so pkexec's parent
+# stays yay across every call -- that is the subject polkit keeps the
+# password for.
+exec pkexec /usr/lib/app-finder/app-finder-pacman "$@"

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Open App Finder: bring back the window of the one that is running, or start
+# it as its own Quickshell process.
+set -eu
+
+APPDIR=${APP_FINDER_DIR:-/usr/share/app-finder}
+
+if quickshell ipc -p "$APPDIR/shell.qml" call app-finder show >/dev/null 2>&1; then
+  exit 0
+fi
+
+exec quickshell -n -p "$APPDIR/shell.qml"

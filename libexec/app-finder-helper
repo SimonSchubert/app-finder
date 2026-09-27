@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+
+# App Finder's hands: the list of tested apps, their pictures, install and
+# remove.
+#
+#   app-finder-helper catalog [--refresh]   one JSON document on stdout
+#   app-finder-helper thumbs                fetch missing pictures
+#   app-finder-helper install <pkg>         JSON lines, one per step
+#   app-finder-helper remove <pkg>          JSON lines, one per step
+#
+# The list is the phone test run's: every AUR package it built and tried on a
+# phone-sized screen, with how well it fit, what went wrong, and up to three
+# screenshots. It lives in the public repo SimonSchubert/mobile-market-data as
+# aur/apps.json and is fetched from there at most hourly, so a re-tested app's
+# rating and pictures arrive without a new release.
+#
+# install is the standard AUR install -- yay builds the package from the AUR
+# as this user -- and whatever root it needs goes through pkexec, so the
+# session's polkit agent is what asks for the password: once per install, by
+# way of app-finder-sudo and App Finder's own polkit action. Only a package the
+# list names is ever installed or removed: nothing the window hands this can
+# name another.
+
+set -euo pipefail
+
+DATA=${APP_FINDER_DATA:-https://raw.githubusercontent.com/SimonSchubert/mobile-market-data/main}
+# A test machine can point at another copy of that data: one URL, one line.
+data_override=${XDG_CONFIG_HOME:-$HOME/.config}/app-finder/data-url
+[[ -s $data_override ]] && DATA=$(head -n1 "$data_override")
+MAX_AGE_MIN=60
+AUR=https://aur.archlinux.org/packages/
+# Next to this script in a checkout, in /usr/lib/app-finder when packaged.
+# Without the polkit action (a checkout that was never installed) every root
+# step is a plain pkexec, and asks on its own.
+LIB=/usr/lib/app-finder
+if [[ -x $LIB/app-finder-sudo && -x $LIB/app-finder-pacman ]]; then
+  SUDO=$LIB/app-finder-sudo
+  ROOT=(pkexec "$LIB/app-finder-pacman" pacman)
+else
+  SUDO=pkexec
+  ROOT=(pkexec pacman)
+fi
+
+cache=${XDG_CACHE_HOME:-$HOME/.cache}/app-finder
+list=$cache/apps.json
+media=$cache/media
+
+mkdir -p "$cache" "$media"
+
+usage() {
+  echo "usage: app-finder-helper catalog [--refresh] | thumbs | install <pkg> | remove <pkg>" >&2
+  exit 2
+}
+
+emit() { jq -nc "$@"; }
+
+step() { emit --arg s "$1" --arg t "$2" --argjson p "$3" '{step: $s, text: $t, progress: $p}'; }
+
+finish() {
+  if [[ $1 == ok ]]; then emit '{done: true, ok: true}'
+  else emit --arg e "$2" '{done: true, ok: false, error: $e}'; fi
+}
+
+fresh() { [[ -s $list ]] && [[ -n $(find "$list" -mmin -"$MAX_AGE_MIN" 2>/dev/null) ]]; }
+
+# Fetched into a temporary file and only moved over the cache once it parses,
+# so a captive portal's HTML page never replaces a good list.
+fetch() {
+  local tmp=$list.tmp.$$
+  if curl -fsSL --max-time 30 -A app-finder -o "$tmp" "$DATA/aur/apps.json" \
+      && jq -e 'type == "object"' "$tmp" >/dev/null 2>&1; then
+    mv -f "$tmp" "$list"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+# Every file name in a directory, as a JSON array.
+names() {
+  local f
+  for f in "$1"/*; do if [[ -s $f ]]; then printf '%s\n' "${f##*/}"; fi; done |
+    jq -Rsc 'split("\n") | map(select(. != ""))'
+}
+
+installed_set() {
+  { pacman -Qq 2>/dev/null || true; } | jq -Rsc 'split("\n") | map(select(. != "")) | map({(.): true}) | add // {}'
+}
+
+cmd_catalog() {
+  local refresh=0 offline=false
+  [[ ${1:-} == --refresh ]] && refresh=1
+  if (( refresh )) || ! fresh; then
+    if ! fetch; then
+      if [[ ! -s $list ]]; then
+        emit '{ok: false, error: "The list of apps could not be reached. Check the connection and try again."}'
+        return 0
+      fi
+      offline=true
+    fi
+  fi
+
+  local installed havemedia fetched
+  installed=$(installed_set)
+  havemedia=$(names "$media")
+  fetched=$(stat -c %Y "$list" 2>/dev/null || stat -f %m "$list")
+
+  jq -c --argjson installed "$installed" --argjson havemedia "$havemedia" \
+      --arg data "$DATA" --arg media "$media" --arg aur "$AUR" \
+      --argjson fetched "$fetched" --argjson offline "$offline" '
+    ($havemedia | map({(.): true}) | add // {}) as $cached
+    # On disk once `thumbs` has fetched it, from the data repo until then.
+    | def picture($dir): if $cached[.] then "file://" + $media + "/" + . else $data + "/aur/" + $dir + "/" + . end;
+    {ok: true, fetchedAt: $fetched, offline: $offline,
+     apps: [to_entries[] | .value
+       | select((.pkg // "") | test("^[a-z0-9][a-z0-9@._+-]*$"))
+       | {id: .pkg, pkg, name: (.name // .pkg), description: (.description // ""),
+          version: (.version // ""), desktop: (.desktop // ""),
+          aurUrl: ($aur + .pkg),
+          installed: ($installed[.pkg] == true),
+          phoneShots: [(.shots // [] | if type == "array" then .[] else empty end) | picture("shots")],
+          icon: (.icon // "" | if type == "string" and . != "" then picture("icons") else "" end),
+          fit: {rating: (.rating // ""), notes: (.notes // []), summary: (.summary // "")}}]}
+  ' "$list"
+}
+
+# Everything the list and the carousel draw, onto the disk, so they scroll
+# from there instead of from the network. Pictures the list no longer names --
+# an app re-tested, with new hashes -- are removed. Prints how many it fetched.
+cmd_thumbs() {
+  [[ -s $list ]] || { echo 0; return 0; }
+  local rows config=$cache/thumbs.curl name url n=0
+  local -A wanted=()
+  rows=$(jq -r --arg data "$DATA" '
+    .[] | ((.shots // [] | if type == "array" then .[] else empty end) | [., $data + "/aur/shots/" + .]),
+          ((.icon // "") | select(type == "string" and . != "") | [., $data + "/aur/icons/" + .])
+    | @tsv' "$list")
+  : >"$config"
+  while IFS=$'\t' read -r name url; do
+    [[ -n $name && $name =~ ^[A-Za-z0-9._-]+$ ]] || continue
+    wanted[$name]=1
+    [[ -s $media/$name ]] && continue
+    printf 'url = "%s"\noutput = "%s"\n' "$url" "$media/$name" >>"$config"
+    n=$((n + 1))
+  done <<<"$rows"
+  if (( n > 0 )); then
+    curl -fsSL --max-time 180 --parallel --parallel-max 6 --remove-on-error \
+      -A app-finder -K "$config" 2>/dev/null || true
+  fi
+  rm -f "$config"
+  local f
+  for f in "$media"/*; do
+    [[ -f $f ]] || continue
+    [[ -n ${wanted[${f##*/}]:-} ]] || rm -f "$f"
+  done
+  echo "$n"
+}
+
+# Arch package names, checked before a name reaches yay or pacman, so "-Sy"
+# or "a b" can never become arguments -- and then only the list's own.
+offered() {
+  [[ $1 =~ ^[a-z0-9][a-z0-9@._+-]*$ ]] || return 1
+  [[ -s $list ]] && jq -e --arg p "$1" 'any(.[]; .pkg == $p)' "$list" >/dev/null 2>&1
+}
+
+# The last thing the command said: the sentence the window shows under the
+# button. polkit's own words for "nobody could ask" are not that sentence.
+reason() {
+  local last
+  if grep -qiE 'no authentication agent|textual authentication agent|not authorized|authorization could not be obtained|dismissed' "$1"; then
+    printf '%s' "It needs your password, and nothing on this session could ask for it."
+    return
+  fi
+  last=$(grep -v '^\s*$' "$1" | tail -n 1 || true)
+  last=${last#error: }
+  last=${last#-> }
+  printf '%s' "${last:-$2}"
+}
+
+cmd_install() {
+  local pkg=${1:-}
+  offered "$pkg" || { finish error "App Finder does not list this app."; return 0; }
+  command -v yay >/dev/null || { finish error "Installing apps from the AUR needs yay."; return 0; }
+  command -v pkexec >/dev/null || { finish error "Installing apps needs pkexec, from polkit."; return 0; }
+
+  step download "Downloading…" 0.1
+  local log=$cache/install.log status=0
+  : >"$log"
+  # No menus: --noconfirm says yes to pacman, and the answers say "none" to
+  # yay's own questions about diffs and clean builds. The moments worth a new
+  # line are the ones that take a while.
+  LANG=C.UTF-8 yay -S --needed --noconfirm \
+      --answerclean None --answerdiff None --answeredit None --answerupgrade None \
+      --sudo "$SUDO" --sudoflags '' \
+      "$pkg" </dev/null 2>&1 | while IFS= read -r line; do
+    printf '%s\n' "$line" >>"$log"
+    case $line in
+      *'Installing missing dependencies'*|*'resolving dependencies'*)
+        step deps "Getting what it needs…" 0.3 ;;
+      *'==> Making package'*)   step build "Building…" 0.45 ;;
+      *'==> Finished making'*)  step install "Installing…" 0.8 ;;
+      *'Running post-transaction hooks'*) step finish "Finishing…" 0.9 ;;
+    esac
+  done || status=$?
+  if (( status != 0 )) || ! pacman -Qq "$pkg" >/dev/null 2>&1; then
+    finish error "$(reason "$log" "The app could not be installed.")"
+    return 0
+  fi
+  finish ok
+}
+
+cmd_remove() {
+  local pkg=${1:-}
+  offered "$pkg" || { finish error "App Finder does not list this app."; return 0; }
+  pacman -Qq "$pkg" >/dev/null 2>&1 || { finish ok; return 0; }
+  command -v pkexec >/dev/null || { finish error "Removing apps needs pkexec, from polkit."; return 0; }
+  step remove "Removing…" 0.4
+  local log=$cache/remove.log
+  if LANG=C.UTF-8 "${ROOT[@]}" -Rns --noconfirm "$pkg" >"$log" 2>&1 </dev/null; then
+    finish ok
+  else
+    finish error "$(reason "$log" "The app could not be removed.")"
+  fi
+}
+
+case ${1:-} in
+  catalog) shift; cmd_catalog "$@" ;;
+  thumbs)  cmd_thumbs ;;
+  install) cmd_install "${2:-}" ;;
+  remove)  cmd_remove "${2:-}" ;;
+  *) usage ;;
+esac

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=App Finder
+GenericName=App store
+Comment=Find apps from the AUR that work on a phone, and install them
+Exec=app-finder
+Icon=app-finder
+Terminal=false
+StartupNotify=false
+Categories=System;PackageManager;
+Keywords=aur;apps;store;install;packages;market;

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
+<policyconfig>
+  <vendor>App Finder</vendor>
+  <vendor_url>https://github.com/SimonSchubert/app-finder</vendor_url>
+  <!-- pacman for one install or removal. auth_admin_keep: yay asks for root
+       several times in one install, and this asks for the password once. -->
+  <action id="io.github.simonschubert.app-finder.pacman">
+    <description>Install or remove an app with App Finder</description>
+    <message>Authentication is required to install or remove an app</message>
+    <icon_name>app-finder</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/app-finder/app-finder-pacman</annotate>
+  </action>
+</policyconfig>
