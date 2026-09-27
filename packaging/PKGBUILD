@@ -19,7 +19,7 @@ optdepends=('yay: install and remove apps from the AUR'
 # A release asset that packaging/release.sh builds from the tag, not GitHub's
 # generated archive of the repository.
 source=("$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('f498a57bd123c5003e31457538352ac5769d69bf10a8a8ecff61aa4aaabe5740')
 
 package() {
   cd "$pkgname-$pkgver"
