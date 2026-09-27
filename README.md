@@ -8,6 +8,14 @@ App Finder is a [Quickshell](https://quickshell.org) app that runs as its own
 process. It needs neither Omarchy nor Omarchy Mobile, but it was made for a
 phone running them.
 
+## Install
+
+From the [AUR](https://aur.archlinux.org/packages/app-finder):
+
+```sh
+yay -S app-finder
+```
+
 ## What it lists
 
 Every AUR package the phone test run built and tried. Each one has:
