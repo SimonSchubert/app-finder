@@ -167,7 +167,11 @@ offered() {
 # button. polkit's own words for "nobody could ask" are not that sentence.
 reason() {
   local last
-  if grep -qiE 'no authentication agent|textual authentication agent|not authorized|authorization could not be obtained|dismissed' "$1"; then
+  if grep -qF 'Request dismissed' "$1"; then
+    printf '%s' "Cancelled."
+    return
+  fi
+  if grep -qiE 'no authentication agent|textual authentication agent|not authorized|authorization could not be obtained' "$1"; then
     printf '%s' "It needs your password, and nothing on this session could ask for it."
     return
   fi
@@ -184,7 +188,7 @@ cmd_install() {
   command -v pkexec >/dev/null || { finish error "Installing apps needs pkexec, from polkit."; return 0; }
 
   step download "Downloading…" 0.1
-  local log=$cache/install.log status=0
+  local log=$cache/install.log status=0 yay_parent=$BASHPID
   : >"$log"
   # No menus: --noconfirm says yes to pacman, and the answers say "none" to
   # yay's own questions about diffs and clean builds. The moments worth a new
@@ -200,6 +204,9 @@ cmd_install() {
       *'==> Making package'*)   step build "Building…" 0.45 ;;
       *'==> Finished making'*)  step install "Installing…" 0.8 ;;
       *'Running post-transaction hooks'*) step finish "Finishing…" 0.9 ;;
+      # Cancel on the password prompt. yay would ask again, twice -- the
+      # person already said no, so the install ends here.
+      *'Request dismissed'*) pkill -P "$yay_parent" -x yay 2>/dev/null || true ;;
     esac
   done || status=$?
   if (( status != 0 )) || ! pacman -Qq "$pkg" >/dev/null 2>&1; then

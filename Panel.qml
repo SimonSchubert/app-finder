@@ -319,6 +319,7 @@ Item {
         + " layout=" + (root.compact ? "phone" : root.split ? "split" : "desktop")
         + " size=" + stage.width + "x" + stage.height
         + " searchFocus=" + (root.searchField && root.searchField.active ? 1 : 0)
+        + " focusItem=" + String(stage.Window.activeFocusItem).split("(")[0]
         + " error=" + (root.error === "" ? "-" : root.error)
     }
 
