@@ -20,9 +20,13 @@ function rank(app) {
 // Worth showing without asking: it works, or nobody knows yet.
 function fits(app) { return rank(app) <= 2 }
 
+// Ours first, in the order the data repo's recommended.json gives them; then
+// the tested rest, best fit first.
 function sorted(apps) {
   var out = (apps || []).slice()
   out.sort(function (a, b) {
+    if (!!a.recommended !== !!b.recommended) return a.recommended ? -1 : 1
+    if (a.recommended) return (a.rank || 0) - (b.rank || 0)
     var d = rank(a) - rank(b)
     if (d) return d
     return String(a.name).toLowerCase() < String(b.name).toLowerCase() ? -1 : 1
@@ -30,14 +34,26 @@ function sorted(apps) {
   return out
 }
 
-// The carousel: the ones that work, with a phone screenshot to show.
+// The carousel: the recommended ones when the data repo names any -- the row
+// is headed "Recommended", so nothing else belongs in it -- and otherwise the
+// ones that work, with a phone screenshot to show.
 function featured(apps, max) {
-  var out = [], limit = max || 12
-  for (var i = 0; i < apps.length && out.length < limit; i++) {
-    var a = apps[i]
+  var out = [], limit = max || 12, i, a
+  for (i = 0; i < apps.length; i++) {
+    a = apps[i]
+    if (a.recommended && a.phoneShots && a.phoneShots.length) out.push(a)
+  }
+  if (out.length) return out
+  for (i = 0; i < apps.length && out.length < limit; i++) {
+    a = apps[i]
     if (rank(a) <= 1 && a.phoneShots && a.phoneShots.length) out.push(a)
   }
   return out
+}
+
+function hasRecommended(apps) {
+  for (var i = 0; i < (apps || []).length; i++) if (apps[i].recommended) return true
+  return false
 }
 
 // A phone screenshot's height over its width: the phone's window, 356x728
@@ -70,6 +86,7 @@ function filter(apps, query, showUnfit) {
 
 // The badge: a word or two, and whether it is good news.
 function badge(app) {
+  if (app && app.recommended) return { text: "Recommended", tone: "good" }
   switch (rating(app)) {
   case "perfect": return { text: "Great fit", tone: "good" }
   case "usable": return { text: "Works", tone: "ok" }

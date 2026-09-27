@@ -43,6 +43,7 @@ fi
 
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/app-finder
 list=$cache/apps.json
+recommended=$cache/recommended.json
 media=$cache/media
 
 mkdir -p "$cache" "$media"
@@ -76,6 +77,35 @@ fetch() {
   return 1
 }
 
+# The hand-kept list of apps to put first (aur/recommended.json), the same
+# way. Optional: a data repo without one, or a fetch that fails, leaves the
+# last copy or none.
+fetch_recommended() {
+  local tmp=$recommended.tmp.$$
+  if curl -fsSL --max-time 30 -A app-finder -o "$tmp" "$DATA/aur/recommended.json" \
+      && jq -e 'type == "array"' "$tmp" >/dev/null 2>&1; then
+    mv -f "$tmp" "$recommended"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+# One list of every app, as the catalogue, the pictures and the installs all
+# see it: the recommended ones first, in their order, each carrying where its
+# pictures live, then the test run's -- less any package already recommended,
+# whose hand-kept entry wins.
+combined() {
+  local rec='[]'
+  [[ -s $recommended ]] && rec=$(cat "$recommended")
+  jq -c --argjson rec "$rec" '
+    ($rec | if type == "array" then . else [] end
+      | to_entries | map(.value + {recommended: true, rank: .key, dir: "recommended/"})) as $r
+    | ($r | map({(.pkg): true}) | add // {}) as $seen
+    | $r + [to_entries[] | .value | select($seen[.pkg] | not) | . + {recommended: false, rank: 0, dir: ""}]
+  ' "$list"
+}
+
 # Every file name in a directory, as a JSON array.
 names() {
   local f
@@ -91,6 +121,7 @@ cmd_catalog() {
   local refresh=0 offline=false
   [[ ${1:-} == --refresh ]] && refresh=1
   if (( refresh )) || ! fresh; then
+    fetch_recommended || true
     if ! fetch; then
       if [[ ! -s $list ]]; then
         emit '{ok: false, error: "The list of apps could not be reached. Check the connection and try again."}'
@@ -105,23 +136,25 @@ cmd_catalog() {
   havemedia=$(names "$media")
   fetched=$(stat -c %Y "$list" 2>/dev/null || stat -f %m "$list")
 
-  jq -c --argjson installed "$installed" --argjson havemedia "$havemedia" \
+  combined | jq -c --argjson installed "$installed" --argjson havemedia "$havemedia" \
       --arg data "$DATA" --arg media "$media" --arg aur "$AUR" \
       --argjson fetched "$fetched" --argjson offline "$offline" '
     ($havemedia | map({(.): true}) | add // {}) as $cached
     # On disk once `thumbs` has fetched it, from the data repo until then.
     | def picture($dir): if $cached[.] then "file://" + $media + "/" + . else $data + "/aur/" + $dir + "/" + . end;
     {ok: true, fetchedAt: $fetched, offline: $offline,
-     apps: [to_entries[] | .value
+     apps: [.[]
        | select((.pkg // "") | test("^[a-z0-9][a-z0-9@._+-]*$"))
+       | .dir as $d
        | {id: .pkg, pkg, name: (.name // .pkg), description: (.description // ""),
           version: (.version // ""), desktop: (.desktop // ""),
           aurUrl: ($aur + .pkg),
           installed: ($installed[.pkg] == true),
-          phoneShots: [(.shots // [] | if type == "array" then .[] else empty end) | picture("shots")],
-          icon: (.icon // "" | if type == "string" and . != "" then picture("icons") else "" end),
+          recommended: (.recommended == true), rank: (.rank // 0),
+          phoneShots: [(.shots // [] | if type == "array" then .[] else empty end) | picture($d + "shots")],
+          icon: (.icon // "" | if type == "string" and . != "" then picture($d + "icons") else "" end),
           fit: {rating: (.rating // ""), notes: (.notes // []), summary: (.summary // "")}}]}
-  ' "$list"
+  '
 }
 
 # Everything the list and the carousel draw, onto the disk, so they scroll
@@ -131,10 +164,11 @@ cmd_thumbs() {
   [[ -s $list ]] || { echo 0; return 0; }
   local rows config=$cache/thumbs.curl name url n=0
   local -A wanted=()
-  rows=$(jq -r --arg data "$DATA" '
-    .[] | ((.shots // [] | if type == "array" then .[] else empty end) | [., $data + "/aur/shots/" + .]),
-          ((.icon // "") | select(type == "string" and . != "") | [., $data + "/aur/icons/" + .])
-    | @tsv' "$list")
+  rows=$(combined | jq -r --arg data "$DATA" '
+    .[] | .dir as $d
+    | ((.shots // [] | if type == "array" then .[] else empty end) | [., $data + "/aur/" + $d + "shots/" + .]),
+      ((.icon // "") | select(type == "string" and . != "") | [., $data + "/aur/" + $d + "icons/" + .])
+    | @tsv')
   : >"$config"
   while IFS=$'\t' read -r name url; do
     [[ -n $name && $name =~ ^[A-Za-z0-9._-]+$ ]] || continue
@@ -160,7 +194,7 @@ cmd_thumbs() {
 # or "a b" can never become arguments -- and then only the list's own.
 offered() {
   [[ $1 =~ ^[a-z0-9][a-z0-9@._+-]*$ ]] || return 1
-  [[ -s $list ]] && jq -e --arg p "$1" 'any(.[]; .pkg == $p)' "$list" >/dev/null 2>&1
+  [[ -s $list ]] && combined | jq -e --arg p "$1" 'any(.[]; .pkg == $p)' >/dev/null 2>&1
 }
 
 # The last thing the command said: the sentence the window shows under the

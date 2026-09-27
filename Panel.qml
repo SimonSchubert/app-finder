@@ -673,7 +673,7 @@ Item {
               Text {
                 visible: !root.compact
                 x: tokens.space(12)
-                text: "Works well on a phone"
+                text: Catalog.hasRecommended(root.featured) ? "Recommended" : "Works well on a phone"
                 font.family: tokens.studioFontFamily
                 font.pixelSize: tokens.phoneAppText
                 font.weight: Font.DemiBold
