@@ -3,6 +3,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs
 import "Hues.js" as Hues
 import "Catalog.js" as Catalog
 import "Glyphs.js" as Glyphs
@@ -367,6 +368,11 @@ Item {
       focus: true
 
       Keys.onEscapePressed: root.back()
+
+      // A theme switched while App Finder was behind another window may have
+      // replaced the file its watch was on: read it again on the way back.
+      readonly property bool windowActive: Window.active
+      onWindowActiveChanged: if (windowActive) Theme.reload()
       // "/" to search, from anywhere a field is not already taking the key.
       Keys.onPressed: function (event) {
         if (event.text === "/" && root.searchField && root.page === "browse") {
@@ -584,16 +590,24 @@ Item {
               width: parent.width
               height: visible ? tokens.tapSlot + tokens.space(12) : 0
 
+              // Shrinks to the room the tabs leave: a theme's monospace font
+              // is wider than a proportional one, and the title would run
+              // under Browse.
               Label {
                 anchors.left: parent.left
                 anchors.leftMargin: tokens.phoneSide
+                anchors.right: phoneTabs.left
+                anchors.rightMargin: tokens.space(8)
                 anchors.verticalCenter: parent.verticalCenter
                 text: "App Finder"
                 font.pixelSize: tokens.phoneTitle
                 font.weight: Font.Medium
+                fontSizeMode: Text.HorizontalFit
+                minimumPixelSize: tokens.space(18)
               }
 
               Row {
+                id: phoneTabs
                 anchors.right: parent.right
                 anchors.rightMargin: tokens.space(8)
                 anchors.verticalCenter: parent.verticalCenter

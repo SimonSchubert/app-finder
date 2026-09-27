@@ -1,30 +1,36 @@
 import QtQuick
+import qs
 
 // The colours, type and sizes every screen is drawn with, by role.
 //
-// App Finder runs as its own Quickshell process, so there is no shell theme to
-// borrow: it follows the desktop's light or dark preference instead, with a
-// palette of its own.
+// The active Omarchy theme's, read from its colors.toml (Theme.qml), so App
+// Finder matches the desktop and the phone it runs on and follows a theme
+// switch. Without one -- a Quickshell desktop that is not Omarchy -- it follows
+// the desktop's light or dark preference with a palette of its own.
 QtObject {
   id: root
 
-  readonly property bool dark: Qt.styleHints.colorScheme !== Qt.ColorScheme.Light
+  readonly property bool themed: Theme.loaded
 
   function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }
   function space(px) { return Math.round(px) }
+  function luminance(c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b }
+
+  readonly property bool dark: root.themed
+    ? (Theme.mode !== "" ? Theme.mode !== "light" : root.luminance(Qt.color(Theme.background)) < 0.5)
+    : Qt.styleHints.colorScheme !== Qt.ColorScheme.Light
 
   // ------------------------------------------------------------ colour
 
-  readonly property color sheetOpaque: dark ? "#1e1e2e" : "#fafafa"
-  readonly property color sheetForeground: dark ? "#e6e6ef" : "#1f1f28"
+  readonly property color sheetOpaque: root.themed ? Theme.background : (dark ? "#1e1e2e" : "#fafafa")
+  readonly property color sheetForeground: root.themed ? Theme.foreground : (dark ? "#e6e6ef" : "#1f1f28")
   readonly property color sheetDim: alpha(sheetForeground, 0.55)
   readonly property color sheetPressed: alpha(sheetForeground, 0.1)
   readonly property color sheetCard: Qt.tint(sheetOpaque, alpha(sheetForeground, dark ? 0.06 : 0.04))
-  readonly property color accent: dark ? "#89b4fa" : "#1e66f5"
-  readonly property color urgent: dark ? "#f38ba8" : "#d20f39"
+  readonly property color accent: root.themed && Theme.accent !== "" ? Theme.accent : (dark ? "#89b4fa" : "#1e66f5")
+  readonly property color urgent: root.themed && Theme.red !== "" ? Theme.red : (dark ? "#f38ba8" : "#d20f39")
   // Text on a filled accent button.
-  readonly property color onAccent: (0.2126 * accent.r + 0.7152 * accent.g + 0.0722 * accent.b) > 0.6
-    ? "#111111" : "#ffffff"
+  readonly property color onAccent: root.luminance(accent) > 0.6 ? "#111111" : "#ffffff"
 
   // ------------------------------------------------------------ size
 
@@ -34,7 +40,9 @@ QtObject {
 
   // ------------------------------------------------------------ type
 
-  readonly property string fontFamily: Qt.application.font.family
+  // Omarchy draws everything in the fontconfig alias `omarchy font set`
+  // writes, which is what "monospace" resolves to there.
+  readonly property string fontFamily: root.themed ? "monospace" : Qt.application.font.family
   readonly property string studioFontFamily: fontFamily
   readonly property int textWeight: Font.Normal
   readonly property int fontSize: 15
