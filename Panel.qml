@@ -59,9 +59,14 @@ Item {
     for (var i = 0; i < root.sorted.length; i++) out[root.sorted[i].id] = root.sorted[i]
     return out
   }
-  readonly property var featured: Catalog.featured(root.sorted, 12)
-  readonly property var filtered: Catalog.filter(root.sorted, root.query, root.showUnfit)
   readonly property bool browsing: root.query === ""
+
+  // Browse is for finding something new: an app already on the phone is
+  // under Installed, not in the carousel or the list. A search still finds
+  // it -- somebody who typed its name wants its page.
+  readonly property var uninstalled: root.sorted.filter(function (a) { return !root.isInstalled(a.id) })
+  readonly property var featured: Catalog.featured(root.uninstalled, 12)
+  readonly property var filtered: Catalog.filter(root.browsing ? root.uninstalled : root.sorted, root.query, root.showUnfit)
 
   readonly property var installedApps: {
     var out = []
@@ -408,7 +413,7 @@ Item {
 
           Repeater {
             model: [
-              { key: "browse", label: "Browse", glyph: Glyphs.MAGNIFY, count: root.apps.length },
+              { key: "browse", label: "Browse", glyph: Glyphs.MAGNIFY, count: root.uninstalled.length },
               { key: "installed", label: "Installed", glyph: Glyphs.DOWNLOAD, count: root.installedApps.length }
             ]
 
@@ -845,6 +850,7 @@ Item {
             tone: "dim"
             text: root.error !== "" && root.apps.length === 0 ? root.error
               : root.page === "installed" ? "None of these apps are installed yet."
+              : root.query === "" ? "Every app here is installed already."
               : "No apps match “" + root.query + "”."
           }
 
