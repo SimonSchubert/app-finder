@@ -27,6 +27,7 @@ Item {
   property string page: "browse"      // browse | installed
   property string detailId: ""
   property string query: ""
+  property string category: ""        // a Catalog.CATEGORIES key, or "" for all
   property bool showUnfit: false
   property real now: Date.now()
 
@@ -66,7 +67,9 @@ Item {
   // it -- somebody who typed its name wants its page.
   readonly property var uninstalled: root.sorted.filter(function (a) { return !root.isInstalled(a.id) })
   readonly property var featured: Catalog.featured(root.uninstalled, 12)
-  readonly property var filtered: Catalog.filter(root.browsing ? root.uninstalled : root.sorted, root.query, root.showUnfit)
+  readonly property var filtered: Catalog.filter(root.browsing ? root.uninstalled : root.sorted, root.query, root.showUnfit, root.category)
+  // A chip for each shelf the list could show something on.
+  readonly property var shelves: Catalog.categories(root.browsing ? root.uninstalled : root.sorted)
 
   readonly property var installedApps: {
     var out = []
@@ -103,6 +106,7 @@ Item {
   function back() {
     if (root.detailId !== "") root.detailId = ""
     else if (root.query !== "") { if (root.searchField) root.searchField.clear() }
+    else if (root.category !== "") root.category = ""
     else if (root.page !== "browse") root.page = "browse"
   }
 
@@ -320,6 +324,8 @@ Item {
         + " page=" + root.page
         + " detail=" + (root.detailId === "" ? "-" : root.detailId)
         + " query=" + (root.query === "" ? "-" : root.query)
+        + " category=" + (root.category === "" ? "-" : root.category)
+        + " shelves=" + root.shelves.map(function (c) { return c.key }).join(",")
         + " apps=" + root.apps.length
         + " listed=" + root.filtered.apps.length
         + " folded=" + root.filtered.hidden
@@ -339,6 +345,7 @@ Item {
     function open(id: string): string { root.show(id); return root.detailApp ? root.detailApp.name : "unknown" }
     function page(name: string): string { root.detailId = ""; root.page = name; return root.page }
     function type(text: string): string { if (root.searchField) root.searchField.text = text; return String(root.filtered.apps.length) }
+    function category(key: string): string { root.category = key === "-" ? "" : key; return String(root.filtered.apps.length) }
     function back(): string { root.back(); return "ok" }
     function refresh(): string { root.refresh(true); return "refreshing" }
     function install(id: string): string { root.install(id); return "queued" }
@@ -673,11 +680,45 @@ Item {
               }
             }
 
+            // ------------------------------------------------ the shelves
+
+            // A chip for each category, All first; tapping the one that is on
+            // turns it off again. It scrolls sideways when they do not fit.
+            ListView {
+              id: shelfRow
+              width: parent.width
+              height: visible ? tokens.tapSlot + tokens.space(8) : 0
+              visible: root.page === "browse" && root.shelves.length > 1
+              orientation: ListView.Horizontal
+              spacing: tokens.space(8)
+              leftMargin: root.compact ? tokens.phoneSide : tokens.space(12)
+              rightMargin: leftMargin
+              boundsBehavior: Flickable.StopAtBounds
+              clip: true
+              model: [{ key: "", label: "All" }].concat(root.shelves)
+
+              delegate: Item {
+                id: shelf
+                required property var modelData
+                width: chip.implicitWidth
+                height: shelfRow.height
+
+                Chip {
+                  id: chip
+                  anchors.verticalCenter: parent.verticalCenter
+                  interactive: true
+                  text: shelf.modelData.label
+                  selected: root.category === shelf.modelData.key
+                  onTapped: root.category = (selected && shelf.modelData.key !== "") ? "" : shelf.modelData.key
+                }
+              }
+            }
+
             // ------------------------------------------------ the carousel
 
             Column {
               width: parent.width
-              visible: root.page === "browse" && root.browsing && root.featured.length > 0
+              visible: root.page === "browse" && root.browsing && root.category === "" && root.featured.length > 0
               topPadding: root.compact ? tokens.space(18) : 0
               spacing: tokens.space(10)
 
@@ -736,7 +777,7 @@ Item {
                     ratio: Catalog.SHOT_RATIO
                     outlined: true
                     sources: phoneCard.modelData.phoneShots || []
-                    cycling: appWindow.visible && (root.split || root.detailId === "") && root.page === "browse" && root.browsing
+                    cycling: appWindow.visible && (root.split || root.detailId === "") && root.page === "browse" && root.browsing && root.category === ""
                     cycleDelay: phoneCard.index * 900
                     decodeWidth: 540
                     initials: phoneCard.modelData.initials
@@ -786,6 +827,7 @@ Item {
                 anchors.bottomMargin: tokens.space(6)
                 text: root.page === "installed" ? "Installed"
                   : root.query !== "" ? (list.count === 1 ? "1 app" : list.count + " apps")
+                  : root.category !== "" ? Catalog.categoryLabel(root.category)
                   : "All apps"
                 font.family: tokens.studioFontFamily
                 font.pixelSize: tokens.phoneAppText
@@ -856,6 +898,7 @@ Item {
             tone: "dim"
             text: root.error !== "" && root.apps.length === 0 ? root.error
               : root.page === "installed" ? "None of these apps are installed yet."
+              : root.query === "" && root.category !== "" ? "Nothing in " + Catalog.categoryLabel(root.category) + " works well on a phone yet."
               : root.query === "" ? "Every app here is installed already."
               : "No apps match “" + root.query + "”."
           }

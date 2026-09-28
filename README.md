@@ -31,6 +31,11 @@ App Finder shows the ones in the theme the phone is in
 (`~/.local/state/omarchy/current/theme.name`), switching with it. Under any
 other theme, or without Omarchy, it shows the app's plain screenshots.
 
+Chips under the search narrow Browse to one category: Games, Productivity,
+Media, Internet, Graphics, Tools, Education or Development. Each app's
+categories come with the list; a chip shows only when some app is in its
+category.
+
 The list and pictures come from
 [SimonSchubert/mobile-market-data](https://github.com/SimonSchubert/mobile-market-data)
 (`aur/apps.json`, `aur/shots`, `aur/icons`). App Finder fetches them at most

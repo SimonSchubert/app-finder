@@ -67,14 +67,46 @@ function matches(app, words) {
   return true
 }
 
+// The shelves, in the order the chips show them. The data repo files every
+// app on one or more of them, by key.
+var CATEGORIES = [
+  { key: "games", label: "Games" },
+  { key: "productivity", label: "Productivity" },
+  { key: "media", label: "Media" },
+  { key: "internet", label: "Internet" },
+  { key: "graphics", label: "Graphics" },
+  { key: "tools", label: "Tools" },
+  { key: "education", label: "Education" },
+  { key: "development", label: "Development" }
+]
+
+function inCategory(app, key) {
+  return !key || (app.categories || []).indexOf(key) >= 0
+}
+
+function categoryLabel(key) {
+  for (var i = 0; i < CATEGORIES.length; i++) if (CATEGORIES[i].key === key) return CATEGORIES[i].label
+  return ""
+}
+
+// The shelves at least one of these apps is on: a chip that led to an empty
+// list would be a dead end.
+function categories(apps) {
+  return CATEGORIES.filter(function (c) {
+    for (var i = 0; i < (apps || []).length; i++) if (inCategory(apps[i], c.key)) return true
+    return false
+  })
+}
+
 // { apps, hidden }: what the list shows, and how many that do not fit a phone
 // it is holding back. A search holds nothing back -- somebody who typed the
 // name wants that app, whatever it scored.
-function filter(apps, query, showUnfit) {
+function filter(apps, query, showUnfit, category) {
   var words = String(query || "").toLowerCase().split(/\s+/).filter(function (w) { return w !== "" })
   var out = [], hidden = 0
   for (var i = 0; i < apps.length; i++) {
     var a = apps[i]
+    if (!inCategory(a, category)) continue
     if (words.length && !matches(a, words)) continue
     if (!words.length && !showUnfit && !fits(a)) { hidden++; continue }
     out.push(a)

@@ -170,6 +170,7 @@ cmd_catalog() {
           aurUrl: ($aur + .pkg),
           installed: ($installed[.pkg] == true),
           recommended: (.recommended == true), rank: (.rank // 0),
+          categories: (.categories // [] | if type == "array" then map(select(type == "string")) else [] end),
           phoneShots: [screens[] | picture($d + "shots")],
           icon: (.icon // "" | if type == "string" and . != "" then picture($d + "icons") else "" end),
           fit: {rating: (.rating // ""), notes: (.notes // []), summary: (.summary // "")}}]}
