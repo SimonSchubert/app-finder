@@ -143,6 +143,12 @@ Item {
     catalog.running = true
   }
 
+  // Another theme, other screens: the catalogue picks them by its name.
+  Connections {
+    target: Theme
+    function onNameChanged() { root.refresh(false) }
+  }
+
   // The last document taken, so an unchanged list -- which is most opens --
   // does not hand the list a new array and throw its scroll away.
   property string lastText: ""

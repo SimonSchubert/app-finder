@@ -16,10 +16,12 @@ import Quickshell.Io
 Singleton {
   id: root
 
-  readonly property string path: {
-    var state = Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")
-    return state + "/omarchy/current/theme/colors.toml"
-  }
+  readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state")) + "/omarchy/current"
+  readonly property string path: stateDir + "/theme/colors.toml"
+
+  // The theme's name, which the screenshots of the recommended apps are
+  // chosen by: a switch shows them drawn in the new one.
+  property string name: ""
 
   property bool loaded: false
   property string mode: ""
@@ -50,7 +52,10 @@ Singleton {
     root.loaded = root.background !== "" && root.foreground !== ""
   }
 
-  function reload() { colors.reload() }
+  function reload() {
+    colors.reload()
+    themeName.reload()
+  }
 
   property FileView colors: FileView {
     path: root.path
@@ -58,6 +63,15 @@ Singleton {
     printErrors: false
     onLoaded: root.parse(text())
     onLoadFailed: root.parse("")
+    onFileChanged: reload()
+  }
+
+  property FileView themeName: FileView {
+    path: root.stateDir + "/theme.name"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.name = text().trim()
+    onLoadFailed: root.name = ""
     onFileChanged: reload()
   }
 }

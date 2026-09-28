@@ -26,6 +26,11 @@ Every AUR package the phone test run built and tried. Each one has:
 Anything that doesn't fit a phone is folded away at the end of the list, and a
 search always finds it.
 
+The recommended apps' screenshots are drawn in every theme Omarchy ships, and
+App Finder shows the ones in the theme the phone is in
+(`~/.local/state/omarchy/current/theme.name`), switching with it. Under any
+other theme, or without Omarchy, it shows the app's plain screenshots.
+
 The list and pictures come from
 [SimonSchubert/mobile-market-data](https://github.com/SimonSchubert/mobile-market-data)
 (`aur/apps.json`, `aur/shots`, `aur/icons`). App Finder fetches them at most

@@ -48,6 +48,17 @@ media=$cache/media
 
 mkdir -p "$cache" "$media"
 
+# The Omarchy theme this phone is in, by name, as `omarchy theme set` wrote it.
+# A recommended app carries its screens drawn in each theme Omarchy ships
+# ("themed"), and the phone is shown the ones in its own; any other theme, or
+# none, gets the app's plain "shots".
+theme_name() {
+  local name
+  name=$(head -n1 "${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/current/theme.name" 2>/dev/null || true)
+  [[ $name =~ ^[a-z0-9][a-z0-9._-]*$ ]] && printf '%s' "$name"
+  return 0
+}
+
 usage() {
   echo "usage: app-finder-helper catalog [--refresh] | thumbs | install <pkg> | remove <pkg>" >&2
   exit 2
@@ -137,11 +148,19 @@ cmd_catalog() {
   fetched=$(stat -c %Y "$list" 2>/dev/null || stat -f %m "$list")
 
   combined | jq -c --argjson installed "$installed" --argjson havemedia "$havemedia" \
-      --arg data "$DATA" --arg media "$media" --arg aur "$AUR" \
+      --arg data "$DATA" --arg media "$media" --arg aur "$AUR" --arg theme "$(theme_name)" \
       --argjson fetched "$fetched" --argjson offline "$offline" '
     ($havemedia | map({(.): true}) | add // {}) as $cached
     # On disk once `thumbs` has fetched it, from the data repo until then.
     | def picture($dir): if $cached[.] then "file://" + $media + "/" + . else $data + "/aur/" + $dir + "/" + . end;
+    # The screens in this theme -- unless they are not on the disk yet and the
+    # network is not there to bring them, as just after a switch with no
+    # signal: the plain ones, which are kept.
+    def screens: (.shots // [] | if type == "array" then . else [] end) as $plain
+        | (.themed[$theme]? // [] | if type == "array" then . else [] end) as $own
+        | if ($own | length) == 0 then $plain
+          elif $offline and (($own | all($cached[.])) | not) and ($plain | all($cached[.])) then $plain
+          else $own end;
     {ok: true, fetchedAt: $fetched, offline: $offline,
      apps: [.[]
        | select((.pkg // "") | test("^[a-z0-9][a-z0-9@._+-]*$"))
@@ -151,22 +170,25 @@ cmd_catalog() {
           aurUrl: ($aur + .pkg),
           installed: ($installed[.pkg] == true),
           recommended: (.recommended == true), rank: (.rank // 0),
-          phoneShots: [(.shots // [] | if type == "array" then .[] else empty end) | picture($d + "shots")],
+          phoneShots: [screens[] | picture($d + "shots")],
           icon: (.icon // "" | if type == "string" and . != "" then picture($d + "icons") else "" end),
           fit: {rating: (.rating // ""), notes: (.notes // []), summary: (.summary // "")}}]}
   '
 }
 
 # Everything the list and the carousel draw, onto the disk, so they scroll
-# from there instead of from the network. Pictures the list no longer names --
-# an app re-tested, with new hashes -- are removed. Prints how many it fetched.
+# from there instead of from the network: the screens in this phone's theme,
+# and the plain ones beside them for a switch made with no signal. Pictures the
+# list no longer names -- an app re-tested, with new hashes, or a theme left --
+# are removed. Prints how many it fetched.
 cmd_thumbs() {
   [[ -s $list ]] || { echo 0; return 0; }
   local rows config=$cache/thumbs.curl name url n=0
   local -A wanted=()
-  rows=$(combined | jq -r --arg data "$DATA" '
+  rows=$(combined | jq -r --arg data "$DATA" --arg theme "$(theme_name)" '
     .[] | .dir as $d
     | ((.shots // [] | if type == "array" then .[] else empty end) | [., $data + "/aur/" + $d + "shots/" + .]),
+      ((.themed[$theme]? // [] | if type == "array" then .[] else empty end) | [., $data + "/aur/" + $d + "shots/" + .]),
       ((.icon // "") | select(type == "string" and . != "") | [., $data + "/aur/" + $d + "icons/" + .])
     | @tsv')
   : >"$config"
