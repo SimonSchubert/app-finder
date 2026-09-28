@@ -17,7 +17,9 @@ QtObject {
   function luminance(c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b }
 
   readonly property bool dark: root.themed
-    ? (Theme.mode !== "" ? Theme.mode !== "light" : root.luminance(Qt.color(Theme.background)) < 0.5)
+    ? (Theme.mode !== "" ? Theme.mode !== "light"
+      // Empty for the moment a switch takes to read the new file.
+      : Theme.background === "" || root.luminance(Qt.color(Theme.background)) < 0.5)
     : Qt.styleHints.colorScheme !== Qt.ColorScheme.Light
 
   // ------------------------------------------------------------ colour
