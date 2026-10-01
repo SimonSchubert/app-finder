@@ -59,7 +59,10 @@ App Finder only installs or removes a package that is on its list.
 ### Needs
 
 - `quickshell`, `ttf-jetbrains-mono-nerd`, `curl`, `jq`, `polkit`
-- `yay` (with `git` and `base-devel`) to install anything
+- `yay` (with `git` and `base-devel`) to install anything. Without them, an
+  install stops and offers to get them first: `git` and `base-devel` from the
+  repos, then `yay-bin` built from its AUR recipe (a prebuilt binary, so no
+  compiler runs). The page says how much that downloads before you agree.
 - a polkit authentication agent in the session. Without one, an install stops
   with "It needs your password, and nothing on this session could ask for it."
 

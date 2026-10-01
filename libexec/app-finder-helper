@@ -6,6 +6,7 @@
 #   app-finder-helper catalog [--refresh]   one JSON document on stdout
 #   app-finder-helper thumbs                fetch missing pictures
 #   app-finder-helper install <pkg>         JSON lines, one per step
+#                     [--with-tools]        first get yay, git and base-devel
 #   app-finder-helper remove <pkg>          JSON lines, one per step
 #
 # The list is the phone test run's: every AUR package it built and tried on a
@@ -238,15 +239,79 @@ reason() {
   printf '%s' "${last:-$2}"
 }
 
+# What an AUR install needs and this device lacks, one per line: git and
+# base-devel from the repos, and yay, which is not in any of them.
+missing_tools() {
+  pacman -Qq git >/dev/null 2>&1 || echo git
+  pacman -Qq base-devel >/dev/null 2>&1 || echo base-devel
+  command -v yay >/dev/null || echo yay
+  return 0
+}
+
+# The download the repo half of that costs, in bytes, as pacman would fetch it
+# now. yay's own few megabytes are not in it.
+tools_bytes() {
+  local -a repo=()
+  mapfile -t repo < <(missing_tools | grep -vx yay || true)
+  (( ${#repo[@]} )) || { echo 0; return 0; }
+  { pacman -Sp --needed --print-format '%s' "${repo[@]}" 2>/dev/null || true; } |
+    awk '/^[0-9]+$/ { n += $1 } END { print n + 0 }'
+}
+
+# git and base-devel from the repos, then yay: yay-bin, built from its AUR
+# recipe -- a prebuilt binary, so no compiler runs -- and installed with
+# pacman -U. Both root steps go through the same pkexec parent, this shell, so
+# the polkit action's keep asks for the password once for the two.
+setup_tools() {
+  local log=$1 dir pkg
+  local -a repo=()
+  mapfile -t repo < <(missing_tools | grep -vx yay || true)
+  if (( ${#repo[@]} )); then
+    step tools "Getting the build tools…" 0.06
+    LANG=C.UTF-8 "${ROOT[@]}" -S --needed --noconfirm "${repo[@]}" >>"$log" 2>&1 </dev/null || return 1
+  fi
+  command -v yay >/dev/null && return 0
+  step yay "Getting yay…" 0.08
+  dir=$(mktemp -d "$cache/yay-bin.XXXXXX")
+  if ! { curl -fsSL --max-time 120 -A app-finder -o "$dir/yay-bin.tar.gz" \
+           https://aur.archlinux.org/cgit/aur.git/snapshot/yay-bin.tar.gz \
+         && tar -xzf "$dir/yay-bin.tar.gz" -C "$dir" \
+         && (cd "$dir/yay-bin" && LANG=C.UTF-8 makepkg -f --noconfirm) ; } >>"$log" 2>&1 </dev/null; then
+    echo "yay could not be built." >>"$log"
+    rm -rf "$dir"
+    return 1
+  fi
+  pkg=$(cd "$dir/yay-bin" && makepkg --packagelist | grep -v -- '-debug-' | head -n 1)
+  LANG=C.UTF-8 "${ROOT[@]}" -U --noconfirm "$pkg" >>"$log" 2>&1 </dev/null || { rm -rf "$dir"; return 1; }
+  rm -rf "$dir"
+  command -v yay >/dev/null
+}
+
 cmd_install() {
-  local pkg=${1:-}
+  local pkg=${1:-} with_tools=0 missing
+  [[ ${2:-} == --with-tools ]] && with_tools=1
   offered "$pkg" || { finish error "App Finder does not list this app."; return 0; }
-  command -v yay >/dev/null || { finish error "Installing apps from the AUR needs yay."; return 0; }
   command -v pkexec >/dev/null || { finish error "Installing apps needs pkexec, from polkit."; return 0; }
 
-  step download "Downloading…" 0.1
   local log=$cache/install.log status=0 yay_parent=$BASHPID
   : >"$log"
+
+  # Without the tools, say which and what they cost, and let the window offer
+  # them: getting them is a download of its own, asked for, not a side effect.
+  missing=$(missing_tools)
+  if [[ -n $missing ]] && (( ! with_tools )); then
+    emit --arg e "Installing apps from the AUR needs yay, git and the build tools. App Finder can get them first." \
+         --argjson m "$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$missing")" \
+         --argjson b "$(tools_bytes)" \
+         '{done: true, ok: false, error: $e, needs: "tools", missing: $m, bytes: $b}'
+    return 0
+  fi
+  if [[ -n $missing ]] && ! setup_tools "$log"; then
+    finish error "$(reason "$log" "The build tools could not be installed.")"
+    return 0
+  fi
+
+  step download "Downloading…" 0.1
   # No menus: --noconfirm says yes to pacman, and the answers say "none" to
   # yay's own questions about diffs and clean builds. The moments worth a new
   # line are the ones that take a while.
@@ -290,7 +355,7 @@ cmd_remove() {
 case ${1:-} in
   catalog) shift; cmd_catalog "$@" ;;
   thumbs)  cmd_thumbs ;;
-  install) cmd_install "${2:-}" ;;
+  install) cmd_install "${2:-}" "${3:-}" ;;
   remove)  cmd_remove "${2:-}" ;;
   *) usage ;;
 esac

@@ -214,7 +214,9 @@ Item {
   // ------------------------------------------------------------ jobs
 
   // id -> { action: "install"|"remove", state: "queued"|"running"|"error",
-  //         step, text, progress, error }. Replaced whole on every change so
+  //         step, text, progress, error, needs, bytes, withTools }. needs is
+  // "tools" when the install stopped for want of yay and its build tools,
+  // and bytes what getting them would download. Replaced whole on every change so
   // bindings on it re-run. A job that succeeds is dropped. One at a time, in
   // the order asked: pacman holds a lock, and a second install would fail on
   // it.
@@ -237,16 +239,19 @@ Item {
     root.jobs = next
   }
 
-  function enqueue(action, id) {
+  function enqueue(action, id, withTools) {
     var job = root.jobs[id]
     if (job && (job.state === "queued" || job.state === "running")) return
-    root.setJob(id, { action: action, state: "queued", step: "", error: "",
-                      text: "Waiting…", progress: 0.05 })
-    root.queue = root.queue.concat([{ action: action, id: id }])
+    root.setJob(id, { action: action, state: "queued", step: "", error: "", needs: "", bytes: 0,
+                      withTools: !!withTools, text: "Waiting…", progress: 0.05 })
+    root.queue = root.queue.concat([{ action: action, id: id, withTools: !!withTools }])
     root.next()
   }
 
-  function install(id) { root.dismiss(id); root.enqueue("install", id) }
+  function install(id) { root.dismiss(id); root.enqueue("install", id, false) }
+  // Get yay, git and base-devel, then the app: what the page offers once an
+  // install has said it needs them.
+  function installWithTools(id) { root.dismiss(id); root.enqueue("install", id, true) }
   function remove(id) { root.enqueue("remove", id) }
   function dismiss(id) {
     var job = root.jobs[id]
@@ -258,10 +263,11 @@ Item {
     var head = root.queue[0]
     root.queue = root.queue.slice(1)
     root.current = head.id
+    // Lower with the tools to get, so their two steps can move the bar.
     root.setJob(head.id, { state: "running", text: head.action === "install" ? "Starting…" : "Removing…",
-                           progress: 0.08 })
+                           progress: head.withTools ? 0.03 : 0.08 })
     jobProcess.action = head.action
-    jobProcess.command = root.helperCommand([head.action, head.id])
+    jobProcess.command = root.helperCommand([head.action, head.id].concat(head.withTools ? ["--with-tools"] : []))
     jobProcess.running = true
   }
 
@@ -277,7 +283,8 @@ Item {
         o[id] = jobProcess.action === "install"
         root.overrides = o
       } else {
-        root.setJob(id, { state: "error", error: ev.error || "Something went wrong." })
+        root.setJob(id, { state: "error", error: ev.error || "Something went wrong.",
+                          needs: ev.needs || "", bytes: ev.bytes || 0 })
       }
       return
     }
@@ -349,6 +356,7 @@ Item {
     function back(): string { root.back(); return "ok" }
     function refresh(): string { root.refresh(true); return "refreshing" }
     function install(id: string): string { root.install(id); return "queued" }
+    function installWithTools(id: string): string { root.installWithTools(id); return "queued" }
     function remove(id: string): string { root.remove(id); return "queued" }
     function glyphs(): string { return Glyphs.listing() }
   }
@@ -1008,7 +1016,11 @@ Item {
           closeGlyph: root.split
           onBack: root.detailId = ""
           onInstall: root.install(pane.shown.id)
-          onRetry: root.install(pane.shown.id)
+          onRetry: {
+            var job = root.jobs[pane.shown.id]
+            if (job && job.needs === "tools") root.installWithTools(pane.shown.id)
+            else root.install(pane.shown.id)
+          }
           onRemove: root.remove(pane.shown.id)
           onOpen: root.openApp(pane.shown.id)
           onSource: root.openSource(pane.shown.id)

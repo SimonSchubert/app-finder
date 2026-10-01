@@ -38,6 +38,8 @@ Item {
   readonly property string rating: Catalog.rating(root.app)
   readonly property bool busy: !!root.job && root.job.state !== "error"
   readonly property bool failed: !!root.job && root.job.state === "error"
+  // Stopped for want of yay and its build tools: the button offers to get them.
+  readonly property bool needsTools: root.failed && root.job.needs === "tools"
   readonly property int side: tokens.space(20)
 
   property bool confirming: false
@@ -168,14 +170,14 @@ Item {
 
               Glyph {
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.failed ? Glyphs.REFRESH : Glyphs.DOWNLOAD
+                text: root.failed && !root.needsTools ? Glyphs.REFRESH : Glyphs.DOWNLOAD
                 color: tokens.onAccent
                 optical: true
               }
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.failed ? "Try again" : "Install"
+                text: root.needsTools ? "Get them and install" : root.failed ? "Try again" : "Install"
                 font.family: tokens.studioFontFamily
                 font.pixelSize: tokens.phoneAppText
                 font.weight: Font.DemiBold
@@ -299,8 +301,11 @@ Item {
         Label {
           width: parent.width
           visible: root.failed
-          text: root.job ? root.job.error : ""
-          tone: "urgent"
+          text: !root.job ? ""
+            : root.needsTools ? root.job.error + (root.job.bytes > 0
+                ? " That is about " + Math.max(1, Math.round(root.job.bytes / 1048576)) + " MB to download, once." : "")
+            : root.job.error
+          tone: root.needsTools ? "ink" : "urgent"
           role: "caption"
           wrapMode: Text.WordWrap
           elide: Text.ElideNone
